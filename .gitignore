@@ -1,0 +1,4 @@
+node_modules/
+*.sarif
+olydi-scan-result.json
+.DS_Store

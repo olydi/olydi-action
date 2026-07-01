@@ -1,0 +1,72 @@
+name: "OLYDI Scan"
+description: "Exploit-gated code-security scan. Uploads SARIF to the Security tab and gates the job on reachable, priced findings."
+author: "OLYDI"
+
+branding:
+  icon: "shield"
+  color: "gray-dark"
+
+inputs:
+  token:
+    description: "OLYDI API token. Generate one at https://app.olydi.com/settings/api-keys and store it as a repository secret."
+    required: true
+  repo:
+    description: "Target repository as owner/repo. Defaults to the repository this workflow runs in."
+    required: false
+    default: ${{ github.repository }}
+  fail-on:
+    description: "Fail the job if findings at/above this severity exist: critical, high, medium, low. Set to empty to never fail the job on findings."
+    required: false
+    default: "high"
+  upload-sarif:
+    description: "Upload SARIF results to the repository's Security > Code scanning tab."
+    required: false
+    default: "true"
+  sarif-path:
+    description: "Path to write the SARIF output."
+    required: false
+    default: "olydi-results.sarif"
+
+outputs:
+  sarif-path:
+    description: "Path to the generated SARIF file."
+    value: ${{ steps.scan.outputs.sarif-path }}
+  run-id:
+    description: "The OLYDI scan run ID."
+    value: ${{ steps.scan.outputs.run-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run OLYDI scan
+      id: scan
+      shell: bash
+      env:
+        OLYDI_TOKEN: ${{ inputs.token }}
+        OLYDI_REPO: ${{ inputs.repo }}
+        OLYDI_FAIL_ON: ${{ inputs.fail-on }}
+        OLYDI_SARIF_PATH: ${{ inputs.sarif-path }}
+      run: |
+        set -o pipefail
+        FAIL_ON_FLAG=()
+        if [ -n "$OLYDI_FAIL_ON" ]; then
+          FAIL_ON_FLAG=(--fail-on "$OLYDI_FAIL_ON")
+        fi
+        echo "sarif-path=$OLYDI_SARIF_PATH" >> "$GITHUB_OUTPUT"
+        npx --yes @olydi/cli scan \
+          --repo "$OLYDI_REPO" \
+          --wait \
+          --sarif "$OLYDI_SARIF_PATH" \
+          --format json \
+          "${FAIL_ON_FLAG[@]}" \
+          | tee olydi-scan-result.json
+        RUN_ID=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('olydi-scan-result.json','utf-8')).run_id ?? '')}catch{console.log('')}")
+        echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF to Security tab
+      # Always runs, even if the scan step above failed the fail-on gate above,
+      # so findings still land in the Security tab on a gated (red) run.
+      if: always() && inputs.upload-sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-path }}

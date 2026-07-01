@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate action.yml structure
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('action.yml') as f:
+              doc = yaml.safe_load(f)
+          required = ['name', 'description', 'inputs', 'outputs', 'runs']
+          for key in required:
+              assert key in doc, f'action.yml missing required key: {key}'
+          assert doc['runs']['using'] == 'composite', 'runs.using must be composite'
+          assert isinstance(doc['runs']['steps'], list) and doc['runs']['steps'], 'runs.steps must be a non-empty array'
+          assert doc['inputs']['token']['required'] is True, 'inputs.token must be required'
+          print('action.yml structure OK')
+          "
+
+      - name: Shellcheck the embedded run: script
+        run: |
+          python3 -c "
+          import yaml
+          with open('action.yml') as f:
+              doc = yaml.safe_load(f)
+          script = doc['runs']['steps'][0]['run']
+          with open('/tmp/embedded.sh', 'w') as f:
+              f.write('#!/bin/bash\n' + script)
+          "
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck /tmp/embedded.sh
+
+  # Exercises the composite action end-to-end against a real OLYDI_TOKEN.
+  # Skips (does not fail the job) until @olydi/cli is published to npm and
+  # an OLYDI_TOKEN secret exists on this repo.
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check prerequisites
+        id: guard
+        run: |
+          if [ -z "${{ secrets.OLYDI_TOKEN }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping smoke test — OLYDI_TOKEN secret not configured yet."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./
+        if: steps.guard.outputs.skip == 'false'
+        with:
+          token: ${{ secrets.OLYDI_TOKEN }}
+          repo: ${{ github.repository }}
+          fail-on: ""
