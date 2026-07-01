@@ -31,7 +31,7 @@ jobs:
           print('action.yml structure OK')
           "
 
-      - name: Shellcheck the embedded run: script
+      - name: Shellcheck the embedded run script
         run: |
           python3 -c "
           import yaml
