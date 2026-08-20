@@ -1,0 +1,45 @@
+steps:
+  - id: validate-composite-action
+    name: python:3.12.11-slim-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq shellcheck
+        python -m pip install --disable-pip-version-check --no-cache-dir PyYAML==6.0.3
+        python - <<'PY'
+        from pathlib import Path
+
+        import yaml
+
+        document = yaml.safe_load(Path("action.yml").read_text(encoding="utf-8"))
+        required = ("name", "description", "inputs", "outputs", "runs")
+        for key in required:
+            assert key in document, f"action.yml missing required key: {key}"
+
+        runs = document["runs"]
+        assert runs["using"] == "composite", "runs.using must be composite"
+        assert isinstance(runs["steps"], list) and runs["steps"], (
+            "runs.steps must be a non-empty array"
+        )
+        assert document["inputs"]["token"]["required"] is True, (
+            "inputs.token must be required"
+        )
+
+        embedded = runs["steps"][0].get("run")
+        assert isinstance(embedded, str) and embedded.strip(), (
+            "the first composite step must contain a non-empty run script"
+        )
+        Path("/workspace/embedded-action.sh").write_text(
+            "#!/usr/bin/env bash\n" + embedded,
+            encoding="utf-8",
+        )
+        print("action.yml structure OK")
+        PY
+        shellcheck /workspace/embedded-action.sh
+
+timeout: 600s
+
+options:
+  logging: CLOUD_LOGGING_ONLY
