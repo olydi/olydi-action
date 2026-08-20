@@ -40,6 +40,7 @@ steps:
         shellcheck /workspace/embedded-action.sh
 
 timeout: 600s
+logsBucket: gs://olydi-prod-owned-repo-ci-logs
 
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: GCS_ONLY
